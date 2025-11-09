@@ -2712,7 +2712,7 @@ function webApproveDenyRegistration(requestID, userEmail, selectedSupervisorEmai
     const regData = regSheet.getDataRange().getValues();
     let regRow = -1;
     for (let i = 1; i < regData.length; i++) {
-      if (regData[i][0] === requestID) {
+      if (regData[i][0] === requestID && regData[i][4] === 'Pending') {
         regRow = i + 1;
         break;
       }
