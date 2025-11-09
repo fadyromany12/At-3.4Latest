@@ -1763,9 +1763,21 @@
         <!--    NEW TAB 9: REPORTING LINE       -->
         <!-- ================================== -->
         <div id="reporting-line-panel" class="tab-panel">
+
+          <div id="pending-movements-section">
+            <h2>Pending Reporting Line Approvals</h2>
+            <p class="text-color-secondary">This section shows requests for you to approve, or requests pending for admins who report to you.</p>
+            <div id="movement-approval-status" class="status-message"></div>
+            <div id="pending-movements-list" class="request-list">
+              <p class="text-color-secondary">Loading pending approvals...</p>
+            </div>
+          </div>
+          
+          <hr class="section-divider">
+
           <form id="reporting-line-form" class="form-container">
-            <h2>Update User Reporting Line</h2>
-            <p class="text-color-secondary">Select a user and assign them to a new supervisor. This action is typically only possible if you are a Superadmin, or if the user and new supervisor are both under your management.</p>
+            <h2>Submit New Movement Request</h2>
+            <p class="text-color-secondary">Select a user and their new supervisor. This will send a request to the new supervisor for approval.</p>
             
             <div class="form-group">
               <label for="reporting-line-user">Select User to Move</label>
@@ -1777,9 +1789,29 @@
               <select id="reporting-line-supervisor" required></select>
             </div>
             
-            <button type="button" onclick="submitReportingLineChange()" style="background-color:var(--konecta-dark)">Update Reporting Line</button>
+            <button type="button" onclick="submitMovementRequest()" style="background-color:var(--konecta-dark)">Submit Movement Request</button>
           </form>
-          <div id="reporting-line-status" class="status-message"></div>
+          <div id="movement-request-status" class="status-message"></div>
+
+          <hr class="section-divider">
+
+          <div id="movement-history-section">
+            <h2>User Movement History</h2>
+            <p classs="text-color-secondary">Select one of your subordinates to view their complete movement history.</p>
+            <form id="movement-history-form" class="form-container" style="background-color: var(--input-bg); border: 1px solid var(--border-color); border-radius: var(--radius); padding: 20px; display: flex; flex-wrap: wrap; gap: 15px; align-items: flex-end;">
+              <div class="form-group" style="flex: 2; min-width: 200px; margin-bottom: 0;">
+                <label for="movement-history-user">Select User</label>
+                <select id="movement-history-user">
+                  </select>
+              </div>
+              <button type="button" class="view-btn" onclick="loadMovementHistory()" style="margin: 0; background-color:var(--konecta-dark)">Load History</button>
+            </form>
+            <div id="movement-history-status" class="status-message"></div>
+            <div id="movement-history-list" class="request-list" style="margin-top: 20px;">
+              <p class="text-color-secondary">Select a user to view their movement history.</p>
+            </div>
+          </div>
+
         </div>
 
         <!-- ================================== -->
@@ -2047,6 +2079,12 @@
         // *** ADD THIS ELSE IF BLOCK ***
         } else if (tabName === 'registration-admin') {
           loadRegistrationAdmin();
+        
+        // *** ADD THIS ELSE IF BLOCK ***
+        } else if (tabName === 'reporting-line') {
+          loadPendingMovements();
+          // Clear history list when tab is clicked
+          document.getElementById('movement-history-list').innerHTML = '<p class="text-color-secondary">Select a user to view their movement history.</p>';
         }
       }
       
@@ -2173,6 +2211,7 @@
           
           populateAdminDropdown(allUsersList, selfUserName, 'reporting-line-user', 'Select a user');
           populateSupervisorDropdown(allAdminsList, 'reporting-line-supervisor');
+          populateAdminDropdown(allUsersList, selfUserName, 'movement-history-user', 'Select your subordinate...');
           
           populateAdminDropdown(allUsersList, selfUserName, 'coaching-agent-select', 'Select an agent');
           
@@ -3800,8 +3839,8 @@
           .webGetMyTeam();
       }
 
-      // --- Submit Reporting Line Change ---
-      function submitReportingLineChange() {
+     // --- Submit Movement Request (MODIFIED) ---
+      function submitMovementRequest() {
         try {
           const userEmail = document.getElementById('reporting-line-user').value;
           const newSupervisorEmail = document.getElementById('reporting-line-supervisor').value;
@@ -3810,25 +3849,149 @@
           if (!newSupervisorEmail) throw new Error("Please select a new supervisor.");
           if (userEmail === newSupervisorEmail) throw new Error("A user cannot be their own supervisor.");
 
-          setStatus('reporting-line-status', 'processing', 'Processing reporting line change...');
+          setStatus('movement-request-status', 'processing', 'Submitting movement request...');
 
           google.script.run
             .withSuccessHandler(msg => {
               if (msg.startsWith('Error:')) {
-                setStatus('reporting-line-status', 'error', msg.replace('Error: ', ''));
+                setStatus('movement-request-status', 'error', msg.replace('Error: ', ''));
               } else {
-                setStatus('reporting-line-status', 'success', msg);
+                setStatus('movement-request-status', 'success', msg);
                 document.getElementById('reporting-line-form').reset();
+                // Also refresh pending list, as the new request might appear
+                loadPendingMovements();
               }
             })
             .withFailureHandler(err => {
-              setStatus('reporting-line-status', 'error', err.message);
+              setStatus('movement-request-status', 'error', err.message);
             })
-            .webUpdateReportingLine(userEmail, newSupervisorEmail);
+            .webSubmitMovementRequest(userEmail, newSupervisorEmail); // <-- MODIFIED Function Name
 
         } catch (err) {
-          setStatus('reporting-line-status', 'error', err.message);
+          setStatus('movement-request-status', 'error', err.message);
         }
+      }
+
+      // --- NEW: Load Pending Movements ---
+      function loadPendingMovements() {
+        const listDiv = document.getElementById('pending-movements-list');
+        listDiv.innerHTML = '<p class="text-color-secondary">Loading pending approvals...</p>';
+        setStatus('movement-approval-status', '', ''); // Clear status
+
+        google.script.run
+          .withSuccessHandler(requests => {
+            if (requests.error) {
+              listDiv.innerHTML = `<p class="status-message error visible">${requests.error}</p>`;
+              return;
+            }
+            if (requests.length === 0) {
+              listDiv.innerHTML = '<p class="text-color-secondary">No pending approvals found.</p>';
+              return;
+            }
+
+            let html = '';
+            requests.forEach(req => {
+              html += `
+                <div class="request-list-item">
+                  <div class="item-details">
+                    <h4>Move: ${req.userToMoveName}</h4>
+                    <p><strong>From:</strong> ${req.fromSupervisorName}</p>
+                    <p><strong>To:</strong> ${req.toSupervisorName}</p>
+                    <p class="text-color-secondary" style="font-size: 0.85rem;">Requested by ${req.requestedByName} on ${formatDate(req.requestedDate)}</p>
+                  </div>
+                  <div class="item-actions">
+                    <button class="approve-btn" onclick="handleMovementApproval('${req.movementID}', 'Approved')">Approve</button>
+                    <button class="deny-btn" onclick="handleMovementApproval('${req.movementID}', 'Denied')">Deny</button>
+                  </div>
+                </div>
+              `;
+            });
+            listDiv.innerHTML = html;
+          })
+          .withFailureHandler(err => {
+            listDiv.innerHTML = `<p class="status-message error visible">Error loading approvals: ${err.message}</p>`;
+          })
+          .webGetPendingMovements();
+      }
+
+      // --- NEW: Handle Movement Approval ---
+      function handleMovementApproval(movementID, newStatus) {
+        setStatus('movement-approval-status', 'processing', 'Processing request...');
+
+        google.script.run
+          .withSuccessHandler(result => {
+            if (result.error) {
+              setStatus('movement-approval-status', 'error', result.error);
+            } else {
+              setStatus('movement-approval-status', 'success', result.message);
+              loadPendingMovements(); // Refresh the list
+            }
+          })
+          .withFailureHandler(err => {
+            setStatus('movement-approval-status', 'error', err.message);
+          })
+          .webApproveDenyMovement(movementID, newStatus);
+      }
+
+      // --- NEW: Load Movement History ---
+      function loadMovementHistory() {
+        const listDiv = document.getElementById('movement-history-list');
+        const userEmail = document.getElementById('movement-history-user').value;
+        
+        if (!userEmail) {
+          setStatus('movement-history-status', 'error', 'Please select a user to view their history.');
+          return;
+        }
+
+        listDiv.innerHTML = '<p class="text-color-secondary">Loading history...</p>';
+        setStatus('movement-history-status', 'processing', 'Loading history...');
+
+        google.script.run
+          .withSuccessHandler(history => {
+            if (history.error) {
+              setStatus('movement-history-status', 'error', history.error);
+              listDiv.innerHTML = '';
+              return;
+            }
+            if (history.length === 0) {
+              setStatus('movement-history-status', 'success', 'No movement history found for this user.');
+              listDiv.innerHTML = '';
+              return;
+            }
+
+            let html = '';
+            history.forEach(item => {
+              let statusClass = '';
+              if (item.status === 'Pending') statusClass = 'status-pending';
+              if (item.status === 'Approved') statusClass = 'status-approved';
+              if (item.status === 'Denied') statusClass = 'status-denied';
+
+              html += `
+                <div class="request-list-item">
+                  <div class="item-details">
+                    <p><strong>From:</strong> ${item.fromSupervisorName}</p>
+                    <p><strong>To:</strong> ${item.toSupervisorName}</p>
+                    <p class="text-color-secondary">Requested: ${formatDate(item.requestDate)} by ${item.requestedByName}</p>
+                    ${item.status !== 'Pending' ? `
+                      <p class="text-color-secondary" style="font-size: 0.9rem;">
+                        <strong>Action:</strong> ${formatDate(item.actionDate)} by ${item.actionByName}
+                      </p>
+                    ` : ''}
+                  </div>
+                  <div class="item-actions">
+                    <span class="status-badge ${statusClass}">${item.status}</span>
+                  </div>
+                </div>
+              `;
+            });
+            listDiv.innerHTML = html;
+            setStatus('movement-history-status', 'success', `Loaded ${history.length} records.`);
+          })
+          .withFailureHandler(err => {
+            setStatus('movement-history-status', 'error', err.message);
+            listDiv.innerHTML = '';
+          })
+          .webGetMovementHistory(userEmail);
       }
 
       // --- NEW: Coaching Functions ---
