@@ -4751,30 +4751,78 @@
       }
 
       function approveDenyRegistration(requestID, userEmail, supervisorEmail, newStatus) {
-        if (newStatus === 'Denied') {
-          if (!confirm(`Are you sure you want to DENY ${userEmail}? They will be prompted to re-select a supervisor.`)) {
-            return;
-          }
-        }
-        
-        setStatus('registration-admin-status', 'processing', `Processing ${newStatus} for ${userEmail}...`);
+        // This is the main function that will be called by the onConfirm callback
+        const runAction = () => {
+          setStatus('registration-admin-status', 'processing', `Processing ${newStatus} for ${userEmail}...`);
 
-        google.script.run
-          .withSuccessHandler(result => {
-            if (result.error) {
-              setStatus('registration-admin-status', 'error', result.error);
-            } else {
-              setStatus('registration-admin-status', 'success', result.message);
-              loadRegistrationAdmin(); // Refresh the list
-            }
-          })
-          .withFailureHandler(err => {
-            setStatus('registration-admin-status', 'error', err.message);
-          })
-          .webApproveDenyRegistration(requestID, userEmail, supervisorEmail, newStatus);
+          google.script.run
+            .withSuccessHandler(result => {
+              if (result.error) {
+                setStatus('registration-admin-status', 'error', result.error);
+              } else {
+                setStatus('registration-admin-status', 'success', result.message);
+                loadRegistrationAdmin(); // Refresh the list
+              }
+            })
+            .withFailureHandler(err => {
+              setStatus('registration-admin-status', 'error', err.message);
+            })
+            .webApproveDenyRegistration(requestID, userEmail, supervisorEmail, newStatus);
+        };
+
+        if (newStatus === 'Denied') {
+          // Show the custom prompt
+          showCustomConfirm(
+            `Are you sure you want to DENY ${userEmail}? They will be prompted to re-select a supervisor.`, // The message
+            'Deny User',        // Confirm button text
+            'deny-btn',         // CSS class for red button
+            runAction           // The function to run if confirmed
+          );
+        } else {
+          // If it's "Approved", just run the action immediately
+          runAction();
+        }
       }
       
       // *** END: REGISTRATION WORKFLOW FUNCTIONS ***
+      // *** START: CUSTOM CONFIRM MODAL FUNCTIONS ***
+      
+      // A variable to hold the callback function
+      let _onConfirmCallback = null;
+
+      function showCustomConfirm(message, confirmText = 'Confirm', confirmClass = 'submit-btn-green', onConfirm = null) {
+        // Set modal content
+        document.getElementById('confirm-modal-message').innerText = message;
+        
+        const confirmBtn = document.getElementById('confirm-modal-confirm-btn');
+        confirmBtn.innerText = confirmText;
+        
+        // Set button style (e.g., 'deny-btn' for red, 'submit-btn-green' for green)
+        confirmBtn.className = ''; // Reset classes
+        confirmBtn.classList.add(confirmClass); // Add the specific class
+        
+        // Store the callback
+        _onConfirmCallback = onConfirm;
+
+        // Set the click handler for the confirm button
+        confirmBtn.onclick = () => {
+          if (typeof _onConfirmCallback === 'function') {
+            _onConfirmCallback();
+          }
+          hideCustomConfirm();
+        };
+
+        // Show the modal
+        document.getElementById('confirm-modal-backdrop').style.display = 'block';
+        document.getElementById('confirm-modal').style.display = 'flex';
+      }
+
+      function hideCustomConfirm() {
+        document.getElementById('confirm-modal-backdrop').style.display = 'none';
+        document.getElementById('confirm-modal').style.display = 'none';
+        _onConfirmCallback = null; // Clear the callback
+      }
+      // *** END: CUSTOM CONFIRM MODAL FUNCTIONS ***
 
       // Initialize
       document.addEventListener("DOMContentLoaded", function() {
@@ -4814,8 +4862,7 @@
         <button type="button" onclick="closeCoachingDetails()" style="min-width: 100px; background-color: var(--konecta-dark);">Close</button>
       </div>
     </div>
-  </body>
-</html>
+  
 <div id="supervisor-modal-backdrop" style="display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background-color: rgba(0,0,0,0.7); z-index: 299;"></div>
     <div id="supervisor-modal" style="display: none; position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%); width: 90%; max-width: 500px; background-color: var(--card-bg); border-radius: var(--radius); z-index: 300; box-shadow: var(--shadow); overflow: hidden; flex-direction: column;">
       
@@ -4840,3 +4887,24 @@
         <button type="button" class="submit-btn-green" style="min-width: 120px;" onclick="saveMySupervisor()">Save and Continue</button>
       </div>
     </div>
+    </div>
+    </div>
+    <div id="confirm-modal-backdrop" style="display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background-color: rgba(0,0,0,0.7); z-index: 399;"></div>
+    <div id="confirm-modal" style="display: none; position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%); width: 90%; max-width: 450px; background-color: var(--card-bg); border-radius: var(--radius); z-index: 400; box-shadow: var(--shadow); overflow: hidden; flex-direction: column;">
+      
+      <div style="padding: 20px 20px 15px 20px;">
+        <h2 id="confirm-modal-title" style="margin: 0; font-size: 1.25rem; color: var(--konecta-blue);">Confirm Action</h2>
+      </div>
+      
+      <div style="padding: 0 20px 20px 20px; flex-grow: 1;">
+        <p id="confirm-modal-message" class="text-color-secondary">Are you sure you want to do this?</p>
+      </div>
+
+      <div style="padding: 15px 20px; border-top: 1px solid var(--border-color); background-color: var(--input-bg); text-align: right; display: flex; gap: 10px; justify-content: flex-end;">
+        <button id="confirm-modal-cancel-btn" type="button" class="view-btn" style="background-color: var(--text-color-secondary);" onclick="hideCustomConfirm()">Cancel</button>
+        <button id="confirm-modal-confirm-btn" type="button" class="deny-btn">Confirm</button>
+      </div>
+    </div>
+
+    </body>
+</html>
